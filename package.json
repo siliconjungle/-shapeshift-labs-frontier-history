@@ -1,0 +1,63 @@
+{
+  "name": "@shapeshift-labs/frontier-history",
+  "version": "0.1.0",
+  "description": "Serializable temporal explanation and causality records for Frontier apps.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history.git"
+  },
+  "homepage": "https://github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history#readme",
+  "bugs": {
+    "url": "https://github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "benchmarks/package-bench.mjs",
+    "benchmarks/competitor-bench.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "npm run build && npm run typecheck && node test/smoke.mjs && node test/fuzz.mjs --cases 900",
+    "prepack": "npm run readme:packages:check && npm run test",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "fuzz": "npm run build && node test/fuzz.mjs",
+    "bench": "npm run build && node --expose-gc benchmarks/package-bench.mjs --out benchmarks/results/frontier-history-package-bench-latest.json",
+    "bench:competitors": "npm run build && node --expose-gc benchmarks/competitor-bench.mjs --out benchmarks/results/frontier-history-competitors-latest.json",
+    "pack:dry": "npm pack --dry-run",
+    "readme:packages": "node benchmarks/package-readme-sections.mjs",
+    "readme:packages:check": "node benchmarks/package-readme-sections.mjs --check"
+  },
+  "keywords": [
+    "frontier",
+    "history",
+    "temporal",
+    "provenance",
+    "audit",
+    "causality",
+    "undo"
+  ],
+  "dependencies": {
+    "@shapeshift-labs/frontier": "0.1.9"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
