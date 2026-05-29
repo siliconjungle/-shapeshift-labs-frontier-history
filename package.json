@@ -7,11 +7,11 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history.git"
+    "url": "git+ssh://git@github.com/siliconjungle/-shapeshift-labs-frontier-history.git"
   },
-  "homepage": "https://github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history#readme",
+  "homepage": "https://github.com/siliconjungle/-shapeshift-labs-frontier-history#readme",
   "bugs": {
-    "url": "https://github.com/siliconjungle/siliconjungle--shapeshift-labs-frontier-history/issues"
+    "url": "https://github.com/siliconjungle/-shapeshift-labs-frontier-history/issues"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
