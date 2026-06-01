@@ -6,7 +6,7 @@ import {
   type FrontierHistoryExplanation,
   type FrontierHistoryTimeline,
   type FrontierHistoryUndoPlan
-} from '../src/index.js';
+} from '../src/index.ts';
 
 const timeline: FrontierHistoryTimeline = createHistoryTimeline({
   records: [{
