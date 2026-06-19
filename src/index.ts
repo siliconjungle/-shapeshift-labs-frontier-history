@@ -384,6 +384,10 @@ export interface FrontierHistoryWindowDiff {
   summary: { added: number; removed: number; changed: number };
 }
 
+export type FrontierHistoryMergeGraphMergeKind = 'linear' | 'branch-merge' | 'octopus-merge' | string;
+
+export type FrontierHistoryMergeGraphStatus = 'applied' | 'rejected' | 'rerun' | 'pending' | 'unknown' | string;
+
 export interface FrontierHistoryMergeGraphEventMetadataInput {
   title?: string;
   description?: string;
@@ -391,6 +395,11 @@ export interface FrontierHistoryMergeGraphEventMetadataInput {
   logicalTime?: string | number;
   recordKind?: FrontierHistoryRecordKind;
   status?: FrontierHistoryRecordStatus;
+  laneId?: string;
+  mergeKind?: FrontierHistoryMergeGraphMergeKind;
+  mergeStatus?: FrontierHistoryMergeGraphStatus;
+  hoverSummary?: string;
+  semanticRegions?: readonly string[];
   action?: string;
   tool?: string;
   workflow?: string;
@@ -413,10 +422,15 @@ export interface FrontierHistoryMergeGraphNodeInput {
   parentIds?: readonly string[];
   label?: string;
   lane?: string;
+  laneId?: string;
   scope?: string;
   at?: number;
   sequence?: number;
   status?: FrontierHistoryRecordStatus;
+  mergeKind?: FrontierHistoryMergeGraphMergeKind;
+  mergeStatus?: FrontierHistoryMergeGraphStatus;
+  hoverSummary?: string;
+  changedSemanticRegions?: readonly string[];
   event?: FrontierHistoryMergeGraphEventMetadataInput;
   metadata?: unknown;
 }
@@ -428,6 +442,7 @@ export interface FrontierHistoryMergeGraphInput {
   timelineId?: string;
   generatedAt?: number;
   lane?: string;
+  laneId?: string;
   scope?: string;
   nodes?: readonly FrontierHistoryMergeGraphNodeInput[];
   source?: string | FrontierRegistrySource;
@@ -442,6 +457,11 @@ export interface FrontierHistoryMergeGraphEventMetadata {
   logicalTime?: string | number;
   recordKind?: FrontierHistoryRecordKind;
   status?: FrontierHistoryRecordStatus;
+  laneId?: string;
+  mergeKind?: FrontierHistoryMergeGraphMergeKind;
+  mergeStatus?: FrontierHistoryMergeGraphStatus;
+  hoverSummary?: string;
+  semanticRegions: string[];
   action?: string;
   tool?: string;
   workflow?: string;
@@ -464,10 +484,15 @@ export interface FrontierHistoryMergeGraphNode {
   parentIds: string[];
   label: string;
   lane?: string;
+  laneId: string;
   scope?: string;
   at?: number;
   sequence: number;
   status?: FrontierHistoryRecordStatus;
+  mergeKind: FrontierHistoryMergeGraphMergeKind;
+  mergeStatus: FrontierHistoryMergeGraphStatus;
+  hoverSummary: string;
+  changedSemanticRegions: string[];
   event: FrontierHistoryMergeGraphEventMetadata;
   metadata?: JsonObject;
 }
@@ -478,6 +503,7 @@ export interface FrontierHistoryMergeGraphParentLink {
   childId: string;
   parentIndex: number;
   lane?: string;
+  laneId?: string;
   scope?: string;
 }
 
@@ -500,6 +526,7 @@ export interface FrontierHistoryMergeGraph {
   generatedAt?: number;
   nodes: FrontierHistoryMergeGraphNode[];
   parentLinks: FrontierHistoryMergeGraphParentLink[];
+  laneIds: string[];
   source?: FrontierRegistrySource;
   tags: string[];
   metadata?: JsonObject;
@@ -783,6 +810,7 @@ export function createHistoryMergeGraph(input: FrontierHistoryMergeGraphInput | 
     ...(input.generatedAt !== undefined ? { generatedAt: input.generatedAt } : {}),
     nodes,
     parentLinks,
+    laneIds: uniqueStrings(nodes.map((node) => node.laneId)),
     ...(input.source ? { source: normalizeSource(input.source) } : {}),
     tags: uniqueStrings(input.tags),
     ...optionalObject('metadata', input.metadata),
@@ -971,6 +999,7 @@ function createHistoryMergeGraphFromTimeline(timeline: FrontierHistoryTimeline):
     ...(timeline.generatedAt !== undefined ? { generatedAt: timeline.generatedAt } : {}),
     nodes,
     parentLinks,
+    laneIds: uniqueStrings(nodes.map((node) => node.laneId)),
     ...(timeline.source ? { source: timeline.source } : {}),
     tags: timeline.tags,
     ...optionalObject('metadata', timeline.metadata),
@@ -980,17 +1009,28 @@ function createHistoryMergeGraphFromTimeline(timeline: FrontierHistoryTimeline):
 
 function mergeGraphNodeFromRecord(record: FrontierHistoryRecord, index: number): FrontierHistoryMergeGraphNode {
   const lane = readString(record.metadata?.lane) ?? record.branch ?? record.workflow ?? record.agent;
+  const laneId = readString(record.metadata?.laneId) ?? lane ?? record.id;
   const scope = readString(record.metadata?.scope) ?? record.feature ?? record.package ?? record.undoScope ?? record.paths[0];
+  const parentIds = uniqueStrings(record.parentIds);
+  const mergeKind = inferMergeGraphKind(parentIds, readString(record.metadata?.mergeKind));
+  const mergeStatus = inferMergeGraphStatus(record.status, readString(record.metadata?.mergeStatus));
+  const changedSemanticRegions = uniqueStrings(readStringArray(record.metadata?.changedSemanticRegions).concat(readStringArray(record.metadata?.semanticRegions), record.paths));
+  const hoverSummary = readString(record.metadata?.hoverSummary) ?? buildMergeGraphHoverSummary(record.title, laneId, mergeKind, mergeStatus, changedSemanticRegions, scope);
   return {
     id: record.id,
     recordId: record.id,
-    parentIds: uniqueStrings(record.parentIds),
+    parentIds,
     label: record.title,
     ...optionalString('lane', lane),
+    laneId,
     ...optionalString('scope', scope),
     at: record.at,
     sequence: record.sequence ?? index,
     status: record.status,
+    mergeKind,
+    mergeStatus,
+    hoverSummary,
+    changedSemanticRegions,
     event: normalizeMergeGraphEvent({
       title: record.title,
       description: record.description,
@@ -998,6 +1038,11 @@ function mergeGraphNodeFromRecord(record: FrontierHistoryRecord, index: number):
       logicalTime: record.logicalTime,
       recordKind: record.recordKind,
       status: record.status,
+      laneId,
+      mergeKind,
+      mergeStatus,
+      hoverSummary,
+      semanticRegions: changedSemanticRegions,
       action: record.action,
       tool: record.tool,
       workflow: record.workflow,
@@ -1019,22 +1064,38 @@ function mergeGraphNodeFromRecord(record: FrontierHistoryRecord, index: number):
 function normalizeMergeGraphNode(input: FrontierHistoryMergeGraphNodeInput, index: number, defaults: FrontierHistoryMergeGraphInput = {}): FrontierHistoryMergeGraphNode {
   const label = readString(input.label) ?? readString(input.event?.title) ?? input.recordId ?? input.id;
   const lane = input.lane ?? defaults.lane;
+  const laneId = readString(input.laneId) ?? readString(defaults.laneId) ?? lane ?? input.recordId ?? input.id;
   const scope = input.scope ?? defaults.scope;
+  const parentIds = uniqueStrings(input.parentIds);
+  const mergeKind = inferMergeGraphKind(parentIds, readString(input.mergeKind) ?? readString(input.event?.mergeKind));
+  const mergeStatus = inferMergeGraphStatus(input.status, readString(input.mergeStatus) ?? readString(input.event?.mergeStatus));
+  const changedSemanticRegions = uniqueStrings((input.changedSemanticRegions ?? input.event?.semanticRegions ?? []).filter((value): value is string => typeof value === 'string' && value.length > 0));
+  const hoverSummary = readString(input.hoverSummary) ?? readString(input.event?.hoverSummary) ?? buildMergeGraphHoverSummary(label, laneId, mergeKind, mergeStatus, changedSemanticRegions, scope);
   return {
     id: normalizeId(input.id, 'history merge graph node id'),
     ...(input.recordId ? { recordId: input.recordId } : {}),
-    parentIds: uniqueStrings(input.parentIds),
+    parentIds,
     label,
     ...optionalString('lane', lane),
+    laneId,
     ...optionalString('scope', scope),
     ...(input.at !== undefined ? { at: input.at } : {}),
     sequence: input.sequence ?? index,
     ...(input.status ? { status: input.status } : {}),
+    mergeKind,
+    mergeStatus,
+    hoverSummary,
+    changedSemanticRegions,
     event: normalizeMergeGraphEvent({
       ...input.event,
       title: input.event?.title ?? label,
       at: input.event?.at ?? input.at,
-      status: input.event?.status ?? input.status
+      status: input.event?.status ?? input.status,
+      laneId,
+      mergeKind,
+      mergeStatus,
+      hoverSummary,
+      semanticRegions: changedSemanticRegions
     }, label),
     ...optionalObject('metadata', input.metadata)
   };
@@ -1048,6 +1109,11 @@ function normalizeMergeGraphEvent(input: FrontierHistoryMergeGraphEventMetadataI
     ...(input.logicalTime !== undefined ? { logicalTime: input.logicalTime } : {}),
     ...(input.recordKind ? { recordKind: input.recordKind } : {}),
     ...(input.status ? { status: input.status } : {}),
+    ...optionalString('laneId', input.laneId),
+    ...(input.mergeKind ? { mergeKind: input.mergeKind } : {}),
+    ...(input.mergeStatus ? { mergeStatus: input.mergeStatus } : {}),
+    ...optionalString('hoverSummary', input.hoverSummary),
+    semanticRegions: uniqueStrings(input.semanticRegions),
     ...optionalString('action', input.action),
     ...optionalString('tool', input.tool),
     ...optionalString('workflow', input.workflow),
@@ -1071,6 +1137,7 @@ function recordMergeGraphEventMetadata(record: FrontierHistoryRecord): JsonObjec
     reads: record.reads,
     writes: record.writes,
     resources: record.resources,
+    semanticRegions: readStringArray(record.metadata?.changedSemanticRegions).concat(readStringArray(record.metadata?.semanticRegions)),
     requestId: record.requestId,
     commandId: record.commandId,
     transactionId: record.transactionId,
@@ -1086,6 +1153,7 @@ function createMergeGraphParentLinks(nodes: readonly FrontierHistoryMergeGraphNo
     childId: node.id,
     parentIndex,
     ...optionalString('lane', node.lane),
+    ...optionalString('laneId', node.laneId),
     ...optionalString('scope', node.scope)
   }))).sort(compareMergeGraphParentLinks);
 }
@@ -1096,7 +1164,7 @@ function summarizeMergeGraph(nodes: readonly FrontierHistoryMergeGraphNode[], pa
     parentLinkCount: parentLinks.length,
     rootNodeCount: nodes.filter((node) => node.parentIds.length === 0).length,
     mergeNodeCount: nodes.filter((node) => node.parentIds.length > 1).length,
-    laneCount: countUnique(nodes.map((node) => node.lane)),
+    laneCount: countUnique(nodes.map((node) => node.laneId)),
     scopeCount: countUnique(nodes.map((node) => node.scope))
   };
 }
@@ -1243,6 +1311,32 @@ function compareMergeGraphParentLinks(left: FrontierHistoryMergeGraphParentLink,
   return left.childId.localeCompare(right.childId) || left.parentIndex - right.parentIndex || left.parentId.localeCompare(right.parentId);
 }
 
+function inferMergeGraphKind(parentIds: readonly string[], explicit?: string): FrontierHistoryMergeGraphMergeKind {
+  if (explicit) return explicit;
+  if (parentIds.length <= 1) return 'linear';
+  if (parentIds.length === 2) return 'branch-merge';
+  return 'octopus-merge';
+}
+
+function inferMergeGraphStatus(status?: FrontierHistoryRecordStatus, explicit?: string): FrontierHistoryMergeGraphStatus {
+  if (explicit) return explicit;
+  if (!status) return 'unknown';
+  if (status === 'ok' || status === 'compensated') return 'applied';
+  if (status === 'failed' || status === 'denied') return 'rejected';
+  if (status === 'blocked' || status === 'pending') return 'rerun';
+  return status;
+}
+
+function buildMergeGraphHoverSummary(label: string, laneId: string, mergeKind: FrontierHistoryMergeGraphMergeKind, mergeStatus: FrontierHistoryMergeGraphStatus, regions: readonly string[], scope?: string): string {
+  const parts = [label];
+  if (mergeKind) parts.push(mergeKind);
+  if (mergeStatus) parts.push(mergeStatus);
+  if (laneId) parts.push('lane ' + laneId);
+  if (scope) parts.push('scope ' + scope);
+  if (regions.length > 0) parts.push('regions ' + regions.slice(0, 3).join(', ') + (regions.length > 3 ? ' +' + (regions.length - 3) + ' more' : ''));
+  return parts.join(' · ');
+}
+
 function isHistoryTimeline(value: unknown): value is FrontierHistoryTimeline {
   return !!value && typeof value === 'object' && (value as { kind?: unknown }).kind === FRONTIER_HISTORY_TIMELINE_KIND;
 }
@@ -1311,6 +1405,12 @@ function normalizePath(path: string): string {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (typeof value === 'string') return value.length > 0 ? [value] : [];
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(value.flatMap((entry) => readString(entry)));
 }
 
 function provenanceEdgeKind(kind: string): string {

@@ -244,7 +244,7 @@ const graph = createHistoryMergeGraph(history);
 - `explainFieldChange` answers why a field changed by collecting direct path records plus related action, workflow, policy, effect, trace, actor, agent, test, replay, and proof records.
 - `planHistoryUndo` describes what undo would mean for a path, action, workflow, policy, effect, actor, agent, test, trace, or record scope.
 - `createHistoryWindow` and `diffHistoryWindows` provide replay-window and audit-window comparisons.
-- `createHistoryMergeGraph` exposes a generic package-level merge graph with nodes, stable parent links, lane/scope labels, and hover-friendly event metadata for agent/coordinator history visualization.
+- `createHistoryMergeGraph` exposes a generic package-level merge graph with nodes, stable parent links, deterministic lane IDs, merge kinds, applied/rejected/rerun status, hover summaries, changed semantic regions, and hover-friendly event metadata for agent/coordinator history visualization.
 - `createHistoryRegistryGraph` and `createHistoryProvenanceGraph` expose temporal evidence as registry/provenance data.
 - `encodeHistoryJsonl`, `decodeHistoryJsonl`, `redactHistoryValue`, and `createHistoryProof` support inspectable replay bundles and AI-readable proof records.
 
@@ -254,7 +254,7 @@ const graph = createHistoryMergeGraph(history);
 
 `@shapeshift-labs/frontier-history` sits above them as a structural explanation layer. It records that a field change was caused by an action, allowed by a policy, produced by an effect, observed in a trace, initiated by a user/agent, active in a workflow step, and proven by a test or replay without importing those packages.
 
-UI graph renderers, including future Loom history views, can consume `createHistoryMergeGraph` output directly. The graph shape stays renderer-neutral: records carry stable IDs, parent IDs, lane/scope labels, and compact event metadata, while layout, hover widgets, and interaction remain owned by the UI layer.
+UI graph renderers, including future Loom history views, can consume `createHistoryMergeGraph` output directly. The graph shape stays renderer-neutral and git-free: records carry stable IDs, parent IDs, lane IDs, merge kinds, merge statuses, hover summaries, changed semantic regions, and compact event metadata, while layout, hover widgets, and interaction remain owned by the UI layer.
 
 ## Benchmarks
 

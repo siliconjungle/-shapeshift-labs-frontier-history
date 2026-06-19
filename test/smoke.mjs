@@ -181,25 +181,105 @@ const octopus = mergeGraph.nodes.find((node) => node.id === 'merge:octopus');
 assert.ok(octopus);
 assert.deepStrictEqual(octopus.parentIds, ['worker:a', 'worker:b', 'worker:c']);
 assert.strictEqual(octopus.lane, 'coordinator');
+assert.strictEqual(octopus.laneId, 'coordinator');
+assert.strictEqual(octopus.mergeKind, 'octopus-merge');
+assert.strictEqual(octopus.mergeStatus, 'applied');
 assert.strictEqual(octopus.scope, 'history-semantic');
 assert.strictEqual(octopus.event.title, 'Octopus merge');
+assert.strictEqual(octopus.event.mergeKind, 'octopus-merge');
+assert.strictEqual(octopus.event.mergeStatus, 'applied');
+assert.ok(octopus.hoverSummary.includes('Octopus merge'));
+assert.ok(octopus.hoverSummary.includes('octopus-merge'));
+assert.deepStrictEqual(octopus.changedSemanticRegions, ['/packages/frontier-history']);
+assert.deepStrictEqual(octopus.event.semanticRegions, ['/packages/frontier-history']);
 assert.strictEqual(mergeGraph.parentLinks.filter((link) => link.childId === 'merge:octopus').length, 3);
 assert.deepStrictEqual(mergeGraph.parentLinks.filter((link) => link.childId === 'merge:octopus').map((link) => link.parentId), ['worker:a', 'worker:b', 'worker:c']);
+assert.deepStrictEqual(mergeGraph.laneIds, ['coordinator', 'history-semantic']);
 assert.strictEqual(mergeGraph.summary.mergeNodeCount, 1);
 assert.strictEqual(mergeGraph.summary.parentLinkCount, 6);
+
+const mergeUpNodes = [
+  {
+    id: 'worker:merge',
+    label: 'Merge upward',
+    at: 4,
+    sequence: 4,
+    parentIds: ['worker:a', 'worker:b'],
+    laneId: 'lane:merge',
+    mergeKind: 'branch-merge',
+    mergeStatus: 'applied',
+    hoverSummary: 'Two workers merged upward',
+    changedSemanticRegions: ['/packages/frontier-history']
+  },
+  {
+    id: 'worker:b',
+    label: 'Worker B',
+    at: 3,
+    sequence: 3,
+    parentIds: ['base'],
+    laneId: 'lane:worker-b',
+    mergeStatus: 'rerun',
+    changedSemanticRegions: ['/packages/frontier-history/test/smoke.mjs']
+  },
+  {
+    id: 'base',
+    label: 'Base',
+    at: 1,
+    sequence: 1,
+    laneId: 'lane:base',
+    mergeStatus: 'applied',
+    changedSemanticRegions: ['/packages/frontier-history']
+  },
+  {
+    id: 'worker:a',
+    label: 'Worker A',
+    at: 2,
+    sequence: 2,
+    parentIds: ['base'],
+    laneId: 'lane:worker-a',
+    mergeStatus: 'applied',
+    changedSemanticRegions: ['/packages/frontier-history/src/index.ts']
+  }
+];
 
 const directMergeGraph = createHistoryMergeGraph({
   id: 'direct.merge',
   lane: 'agent',
   scope: 'package',
+  laneId: 'lane:agent',
   nodes: [
-    { id: 'n1', label: 'Root event', event: { status: 'ok', tags: ['root'] } },
-    { id: 'n2', parentIds: ['n1'], event: { title: 'Child event', actor: 'agent:worker' } }
+    { id: 'n1', label: 'Root event', event: { status: 'ok', tags: ['root'], mergeStatus: 'applied', semanticRegions: ['/packages/frontier-history'] } },
+    { id: 'n2', parentIds: ['n1'], event: { title: 'Child event', actor: 'agent:worker', mergeStatus: 'rerun', hoverSummary: 'Child event reran' } }
   ]
 });
 assert.strictEqual(directMergeGraph.nodes[1].lane, 'agent');
+assert.strictEqual(directMergeGraph.nodes[1].laneId, 'lane:agent');
 assert.strictEqual(directMergeGraph.nodes[1].scope, 'package');
 assert.strictEqual(directMergeGraph.parentLinks[0].id, 'history-merge-parent:n1->n2');
+assert.strictEqual(directMergeGraph.nodes[0].mergeStatus, 'applied');
+assert.strictEqual(directMergeGraph.nodes[1].mergeStatus, 'rerun');
+assert.strictEqual(directMergeGraph.nodes[1].hoverSummary, 'Child event reran');
+assert.ok(directMergeGraph.laneIds.includes('lane:agent'));
+
+const scrambledMergeGraph = createHistoryMergeGraph({
+  id: 'scrambled.merge',
+  nodes: mergeUpNodes
+});
+assert.deepStrictEqual(scrambledMergeGraph.nodes.map((node) => node.id), ['base', 'worker:a', 'worker:b', 'worker:merge']);
+assert.deepStrictEqual(scrambledMergeGraph.laneIds, ['lane:base', 'lane:merge', 'lane:worker-a', 'lane:worker-b']);
+const mergeNode = scrambledMergeGraph.nodes.find((node) => node.id === 'worker:merge');
+assert.ok(mergeNode);
+assert.strictEqual(mergeNode.mergeKind, 'branch-merge');
+assert.strictEqual(mergeNode.mergeStatus, 'applied');
+assert.strictEqual(mergeNode.hoverSummary, 'Two workers merged upward');
+assert.deepStrictEqual(mergeNode.changedSemanticRegions, ['/packages/frontier-history']);
+assert.strictEqual(scrambledMergeGraph.parentLinks.filter((link) => link.childId === 'worker:merge').length, 2);
+assert.deepStrictEqual(scrambledMergeGraph.parentLinks.filter((link) => link.childId === 'worker:merge').map((link) => link.laneId), ['lane:merge', 'lane:merge']);
+
+const rejectedGraph = createHistoryMergeGraph({
+  nodes: [{ id: 'rejected:merge', label: 'Rejected merge', status: 'failed', mergeStatus: 'rejected' }]
+});
+assert.strictEqual(rejectedGraph.nodes[0].mergeStatus, 'rejected');
 
 const jsonl = encodeHistoryJsonl([timeline, explanation, undo]);
 assert.strictEqual(decodeHistoryJsonl(jsonl).length, 3);
