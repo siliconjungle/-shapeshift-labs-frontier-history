@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import {
   compileHistoryTimeline,
+  createHistoryMergeGraph,
   createHistoryProof,
   createHistoryProvenanceGraph,
   createHistoryRegistryGraph,
@@ -121,6 +122,84 @@ assert.ok(graph.entries.some((entry) => entry.id === 'history-record:action:todo
 assert.ok(graph.edges.some((edge) => edge.kind === 'caused-by-action' && edge.to.endsWith('action.todos.complete')));
 const prov = createHistoryProvenanceGraph(timeline);
 assert.ok(prov.edges.some((edge) => edge.kind === 'wasGeneratedBy'));
+
+const mergeTimeline = createHistoryTimeline({
+  id: 'agent.history',
+  package: '@shapeshift-labs/frontier-history',
+  feature: 'semantic-merge',
+  generatedAt: 20,
+  records: [
+    {
+      id: 'base:coordinator',
+      kind: 'agent-run',
+      at: 1,
+      agent: 'agent:coordinator',
+      paths: ['/packages/frontier-history'],
+      metadata: { lane: 'coordinator', scope: 'history' }
+    },
+    {
+      id: 'worker:a',
+      kind: 'agent-run',
+      at: 2,
+      parentIds: ['base:coordinator'],
+      agent: 'agent:a',
+      paths: ['/packages/frontier-history/src/index.ts'],
+      metadata: { lane: 'history-semantic', scope: 'types' }
+    },
+    {
+      id: 'worker:b',
+      kind: 'agent-run',
+      at: 3,
+      parentIds: ['base:coordinator'],
+      agent: 'agent:b',
+      paths: ['/packages/frontier-history/test/smoke.mjs'],
+      metadata: { lane: 'history-semantic', scope: 'tests' }
+    },
+    {
+      id: 'worker:c',
+      kind: 'agent-run',
+      at: 4,
+      parentIds: ['base:coordinator'],
+      agent: 'agent:c',
+      paths: ['/packages/frontier-history/README.md'],
+      metadata: { lane: 'history-semantic', scope: 'docs' }
+    },
+    {
+      id: 'merge:octopus',
+      kind: 'agent-run',
+      title: 'Octopus merge',
+      at: 5,
+      parentIds: ['worker:c', 'worker:a', 'worker:b'],
+      agent: 'agent:coordinator',
+      paths: ['/packages/frontier-history'],
+      metadata: { lane: 'coordinator', scope: 'history-semantic' }
+    }
+  ]
+});
+const mergeGraph = createHistoryMergeGraph(mergeTimeline);
+const octopus = mergeGraph.nodes.find((node) => node.id === 'merge:octopus');
+assert.ok(octopus);
+assert.deepStrictEqual(octopus.parentIds, ['worker:a', 'worker:b', 'worker:c']);
+assert.strictEqual(octopus.lane, 'coordinator');
+assert.strictEqual(octopus.scope, 'history-semantic');
+assert.strictEqual(octopus.event.title, 'Octopus merge');
+assert.strictEqual(mergeGraph.parentLinks.filter((link) => link.childId === 'merge:octopus').length, 3);
+assert.deepStrictEqual(mergeGraph.parentLinks.filter((link) => link.childId === 'merge:octopus').map((link) => link.parentId), ['worker:a', 'worker:b', 'worker:c']);
+assert.strictEqual(mergeGraph.summary.mergeNodeCount, 1);
+assert.strictEqual(mergeGraph.summary.parentLinkCount, 6);
+
+const directMergeGraph = createHistoryMergeGraph({
+  id: 'direct.merge',
+  lane: 'agent',
+  scope: 'package',
+  nodes: [
+    { id: 'n1', label: 'Root event', event: { status: 'ok', tags: ['root'] } },
+    { id: 'n2', parentIds: ['n1'], event: { title: 'Child event', actor: 'agent:worker' } }
+  ]
+});
+assert.strictEqual(directMergeGraph.nodes[1].lane, 'agent');
+assert.strictEqual(directMergeGraph.nodes[1].scope, 'package');
+assert.strictEqual(directMergeGraph.parentLinks[0].id, 'history-merge-parent:n1->n2');
 
 const jsonl = encodeHistoryJsonl([timeline, explanation, undo]);
 assert.strictEqual(decodeHistoryJsonl(jsonl).length, 3);

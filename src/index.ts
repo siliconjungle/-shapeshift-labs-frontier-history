@@ -18,6 +18,8 @@ export const FRONTIER_HISTORY_UNDO_PLAN_KIND = 'frontier.history.undo-plan';
 export const FRONTIER_HISTORY_UNDO_PLAN_VERSION = 1;
 export const FRONTIER_HISTORY_PROOF_KIND = 'frontier.history.proof';
 export const FRONTIER_HISTORY_PROOF_VERSION = 1;
+export const FRONTIER_HISTORY_MERGE_GRAPH_KIND = 'frontier.history.merge-graph';
+export const FRONTIER_HISTORY_MERGE_GRAPH_VERSION = 1;
 
 export type FrontierHistoryRecordKind =
   | 'patch'
@@ -382,6 +384,128 @@ export interface FrontierHistoryWindowDiff {
   summary: { added: number; removed: number; changed: number };
 }
 
+export interface FrontierHistoryMergeGraphEventMetadataInput {
+  title?: string;
+  description?: string;
+  at?: number;
+  logicalTime?: string | number;
+  recordKind?: FrontierHistoryRecordKind;
+  status?: FrontierHistoryRecordStatus;
+  action?: string;
+  tool?: string;
+  workflow?: string;
+  step?: string;
+  actor?: string;
+  agent?: string;
+  owner?: string;
+  package?: string;
+  feature?: string;
+  traceId?: string;
+  spanId?: string;
+  artifacts?: readonly string[];
+  tags?: readonly string[];
+  metadata?: unknown;
+}
+
+export interface FrontierHistoryMergeGraphNodeInput {
+  id: string;
+  recordId?: string;
+  parentIds?: readonly string[];
+  label?: string;
+  lane?: string;
+  scope?: string;
+  at?: number;
+  sequence?: number;
+  status?: FrontierHistoryRecordStatus;
+  event?: FrontierHistoryMergeGraphEventMetadataInput;
+  metadata?: unknown;
+}
+
+export interface FrontierHistoryMergeGraphInput {
+  id?: string;
+  title?: string;
+  description?: string;
+  timelineId?: string;
+  generatedAt?: number;
+  lane?: string;
+  scope?: string;
+  nodes?: readonly FrontierHistoryMergeGraphNodeInput[];
+  source?: string | FrontierRegistrySource;
+  tags?: readonly string[];
+  metadata?: unknown;
+}
+
+export interface FrontierHistoryMergeGraphEventMetadata {
+  title: string;
+  description?: string;
+  at?: number;
+  logicalTime?: string | number;
+  recordKind?: FrontierHistoryRecordKind;
+  status?: FrontierHistoryRecordStatus;
+  action?: string;
+  tool?: string;
+  workflow?: string;
+  step?: string;
+  actor?: string;
+  agent?: string;
+  owner?: string;
+  package?: string;
+  feature?: string;
+  traceId?: string;
+  spanId?: string;
+  artifacts: string[];
+  tags: string[];
+  metadata?: JsonObject;
+}
+
+export interface FrontierHistoryMergeGraphNode {
+  id: string;
+  recordId?: string;
+  parentIds: string[];
+  label: string;
+  lane?: string;
+  scope?: string;
+  at?: number;
+  sequence: number;
+  status?: FrontierHistoryRecordStatus;
+  event: FrontierHistoryMergeGraphEventMetadata;
+  metadata?: JsonObject;
+}
+
+export interface FrontierHistoryMergeGraphParentLink {
+  id: string;
+  parentId: string;
+  childId: string;
+  parentIndex: number;
+  lane?: string;
+  scope?: string;
+}
+
+export interface FrontierHistoryMergeGraphSummary {
+  nodeCount: number;
+  parentLinkCount: number;
+  rootNodeCount: number;
+  mergeNodeCount: number;
+  laneCount: number;
+  scopeCount: number;
+}
+
+export interface FrontierHistoryMergeGraph {
+  kind: typeof FRONTIER_HISTORY_MERGE_GRAPH_KIND;
+  version: typeof FRONTIER_HISTORY_MERGE_GRAPH_VERSION;
+  id: string;
+  timelineId?: string;
+  title?: string;
+  description?: string;
+  generatedAt?: number;
+  nodes: FrontierHistoryMergeGraphNode[];
+  parentLinks: FrontierHistoryMergeGraphParentLink[];
+  source?: FrontierRegistrySource;
+  tags: string[];
+  metadata?: JsonObject;
+  summary: FrontierHistoryMergeGraphSummary;
+}
+
 export interface FrontierHistoryProof {
   kind: typeof FRONTIER_HISTORY_PROOF_KIND;
   version: typeof FRONTIER_HISTORY_PROOF_VERSION;
@@ -641,6 +765,31 @@ export function diffHistoryWindows(left: FrontierHistoryWindow | FrontierHistory
   };
 }
 
+export function createHistoryMergeGraph(input: FrontierHistoryMergeGraphInput | FrontierHistoryTimeline | FrontierCompiledHistoryTimeline = {}): FrontierHistoryMergeGraph {
+  if (isCompiledTimeline(input)) return createHistoryMergeGraphFromTimeline(input.timeline);
+  if (isHistoryTimeline(input)) return createHistoryMergeGraphFromTimeline(input);
+
+  const nodes = (input.nodes ?? [])
+    .map((node, index) => normalizeMergeGraphNode(node, index, input))
+    .sort(compareMergeGraphNodes);
+  const parentLinks = createMergeGraphParentLinks(nodes);
+  return {
+    kind: FRONTIER_HISTORY_MERGE_GRAPH_KIND,
+    version: FRONTIER_HISTORY_MERGE_GRAPH_VERSION,
+    id: normalizeId(input.id ?? 'history.merge-graph', 'history merge graph id'),
+    ...(input.timelineId ? { timelineId: input.timelineId } : {}),
+    ...(input.title ? { title: input.title } : {}),
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.generatedAt !== undefined ? { generatedAt: input.generatedAt } : {}),
+    nodes,
+    parentLinks,
+    ...(input.source ? { source: normalizeSource(input.source) } : {}),
+    tags: uniqueStrings(input.tags),
+    ...optionalObject('metadata', input.metadata),
+    summary: summarizeMergeGraph(nodes, parentLinks)
+  };
+}
+
 export function createHistoryRegistryGraph(timelineOrCompiled: FrontierHistoryTimeline | FrontierCompiledHistoryTimeline, options: { generatedAt?: number; metadata?: unknown } = {}): FrontierRegistryGraph {
   const timeline = isCompiledTimeline(timelineOrCompiled) ? timelineOrCompiled.timeline : timelineOrCompiled;
   const entries: FrontierRegistryEntry[] = [];
@@ -809,6 +958,149 @@ function normalizeLink(input: FrontierHistoryLinkInput): FrontierHistoryLink {
   };
 }
 
+function createHistoryMergeGraphFromTimeline(timeline: FrontierHistoryTimeline): FrontierHistoryMergeGraph {
+  const nodes = timeline.records.map(mergeGraphNodeFromRecord).sort(compareMergeGraphNodes);
+  const parentLinks = createMergeGraphParentLinks(nodes);
+  return {
+    kind: FRONTIER_HISTORY_MERGE_GRAPH_KIND,
+    version: FRONTIER_HISTORY_MERGE_GRAPH_VERSION,
+    id: timeline.id + '.merge-graph',
+    timelineId: timeline.id,
+    ...(timeline.title ? { title: timeline.title } : {}),
+    ...(timeline.description ? { description: timeline.description } : {}),
+    ...(timeline.generatedAt !== undefined ? { generatedAt: timeline.generatedAt } : {}),
+    nodes,
+    parentLinks,
+    ...(timeline.source ? { source: timeline.source } : {}),
+    tags: timeline.tags,
+    ...optionalObject('metadata', timeline.metadata),
+    summary: summarizeMergeGraph(nodes, parentLinks)
+  };
+}
+
+function mergeGraphNodeFromRecord(record: FrontierHistoryRecord, index: number): FrontierHistoryMergeGraphNode {
+  const lane = readString(record.metadata?.lane) ?? record.branch ?? record.workflow ?? record.agent;
+  const scope = readString(record.metadata?.scope) ?? record.feature ?? record.package ?? record.undoScope ?? record.paths[0];
+  return {
+    id: record.id,
+    recordId: record.id,
+    parentIds: uniqueStrings(record.parentIds),
+    label: record.title,
+    ...optionalString('lane', lane),
+    ...optionalString('scope', scope),
+    at: record.at,
+    sequence: record.sequence ?? index,
+    status: record.status,
+    event: normalizeMergeGraphEvent({
+      title: record.title,
+      description: record.description,
+      at: record.at,
+      logicalTime: record.logicalTime,
+      recordKind: record.recordKind,
+      status: record.status,
+      action: record.action,
+      tool: record.tool,
+      workflow: record.workflow,
+      step: record.step,
+      actor: record.actor ?? record.user ?? record.subject,
+      agent: record.agent,
+      owner: record.owner,
+      package: record.package,
+      feature: record.feature,
+      traceId: record.traceId,
+      spanId: record.spanId,
+      artifacts: record.artifacts,
+      tags: record.tags,
+      metadata: recordMergeGraphEventMetadata(record)
+    }, record.title)
+  };
+}
+
+function normalizeMergeGraphNode(input: FrontierHistoryMergeGraphNodeInput, index: number, defaults: FrontierHistoryMergeGraphInput = {}): FrontierHistoryMergeGraphNode {
+  const label = readString(input.label) ?? readString(input.event?.title) ?? input.recordId ?? input.id;
+  const lane = input.lane ?? defaults.lane;
+  const scope = input.scope ?? defaults.scope;
+  return {
+    id: normalizeId(input.id, 'history merge graph node id'),
+    ...(input.recordId ? { recordId: input.recordId } : {}),
+    parentIds: uniqueStrings(input.parentIds),
+    label,
+    ...optionalString('lane', lane),
+    ...optionalString('scope', scope),
+    ...(input.at !== undefined ? { at: input.at } : {}),
+    sequence: input.sequence ?? index,
+    ...(input.status ? { status: input.status } : {}),
+    event: normalizeMergeGraphEvent({
+      ...input.event,
+      title: input.event?.title ?? label,
+      at: input.event?.at ?? input.at,
+      status: input.event?.status ?? input.status
+    }, label),
+    ...optionalObject('metadata', input.metadata)
+  };
+}
+
+function normalizeMergeGraphEvent(input: FrontierHistoryMergeGraphEventMetadataInput, fallbackTitle: string): FrontierHistoryMergeGraphEventMetadata {
+  return {
+    title: input.title ?? fallbackTitle,
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.at !== undefined ? { at: input.at } : {}),
+    ...(input.logicalTime !== undefined ? { logicalTime: input.logicalTime } : {}),
+    ...(input.recordKind ? { recordKind: input.recordKind } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    ...optionalString('action', input.action),
+    ...optionalString('tool', input.tool),
+    ...optionalString('workflow', input.workflow),
+    ...optionalString('step', input.step),
+    ...optionalString('actor', input.actor),
+    ...optionalString('agent', input.agent),
+    ...optionalString('owner', input.owner),
+    ...optionalString('package', input.package),
+    ...optionalString('feature', input.feature),
+    ...optionalString('traceId', input.traceId),
+    ...optionalString('spanId', input.spanId),
+    artifacts: uniqueStrings(input.artifacts),
+    tags: uniqueStrings(input.tags),
+    ...optionalObject('metadata', input.metadata)
+  };
+}
+
+function recordMergeGraphEventMetadata(record: FrontierHistoryRecord): JsonObject {
+  return compactJsonObject({
+    paths: record.paths,
+    reads: record.reads,
+    writes: record.writes,
+    resources: record.resources,
+    requestId: record.requestId,
+    commandId: record.commandId,
+    transactionId: record.transactionId,
+    proof: record.proof,
+    replay: record.replay
+  });
+}
+
+function createMergeGraphParentLinks(nodes: readonly FrontierHistoryMergeGraphNode[]): FrontierHistoryMergeGraphParentLink[] {
+  return nodes.flatMap((node) => node.parentIds.map((parentId, parentIndex) => ({
+    id: 'history-merge-parent:' + parentId + '->' + node.id,
+    parentId,
+    childId: node.id,
+    parentIndex,
+    ...optionalString('lane', node.lane),
+    ...optionalString('scope', node.scope)
+  }))).sort(compareMergeGraphParentLinks);
+}
+
+function summarizeMergeGraph(nodes: readonly FrontierHistoryMergeGraphNode[], parentLinks: readonly FrontierHistoryMergeGraphParentLink[]): FrontierHistoryMergeGraphSummary {
+  return {
+    nodeCount: nodes.length,
+    parentLinkCount: parentLinks.length,
+    rootNodeCount: nodes.filter((node) => node.parentIds.length === 0).length,
+    mergeNodeCount: nodes.filter((node) => node.parentIds.length > 1).length,
+    laneCount: countUnique(nodes.map((node) => node.lane)),
+    scopeCount: countUnique(nodes.map((node) => node.scope))
+  };
+}
+
 function summarizeRecords(records: readonly FrontierHistoryRecord[]): FrontierHistorySummary {
   return {
     recordCount: records.length,
@@ -943,6 +1235,14 @@ function compareRecords(left: FrontierHistoryRecord, right: FrontierHistoryRecor
   return left.at - right.at || left.sequence - right.sequence || left.id.localeCompare(right.id);
 }
 
+function compareMergeGraphNodes(left: FrontierHistoryMergeGraphNode, right: FrontierHistoryMergeGraphNode): number {
+  return (left.at ?? 0) - (right.at ?? 0) || left.sequence - right.sequence || left.id.localeCompare(right.id);
+}
+
+function compareMergeGraphParentLinks(left: FrontierHistoryMergeGraphParentLink, right: FrontierHistoryMergeGraphParentLink): number {
+  return left.childId.localeCompare(right.childId) || left.parentIndex - right.parentIndex || left.parentId.localeCompare(right.parentId);
+}
+
 function isHistoryTimeline(value: unknown): value is FrontierHistoryTimeline {
   return !!value && typeof value === 'object' && (value as { kind?: unknown }).kind === FRONTIER_HISTORY_TIMELINE_KIND;
 }
@@ -976,6 +1276,14 @@ function asJsonObject(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined;
   if (value && typeof value === 'object' && !Array.isArray(value)) return cloneJson(value as JsonObject) as JsonObject;
   return { value: toJsonValue(value) };
+}
+
+function compactJsonObject(value: Record<string, JsonValue | undefined>): JsonObject {
+  const out: JsonObject = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) out[key] = cloneJson(entry);
+  }
+  return out;
 }
 
 function toJsonValue(value: unknown): JsonValue {
